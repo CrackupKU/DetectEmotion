@@ -4,13 +4,18 @@ import os
 from pathlib import Path
 import numpy as np
 
+import plotly.express as px
+
+from gui import move_circle
+
 import cv2
 import torch
 import torch.backends.cudnn as cudnn
-from numpy import random
 
 from emotion import detect_emotion, init
-
+import pandas as pd
+import matplotlib.pyplot as plt
+from drawnow import *
 from models.experimental import attempt_load
 from utils.datasets import LoadStreams, LoadImages
 from utils.general import check_img_size, check_requirements, check_imshow, non_max_suppression, \
@@ -18,9 +23,17 @@ from utils.general import check_img_size, check_requirements, check_imshow, non_
 from utils.plots import plot_one_box
 from utils.torch_utils import select_device, time_synchronized
 
+from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+from matplotlib.figure import Figure
+
 
 def detect(opt):
-    source, view_img, imgsz, nosave, show_conf, save_path, show_fps = opt.source, not opt.hide_img, opt.img_size, opt.no_save, not opt.hide_conf, opt.output_path, opt.show_fps
+    #ADDON
+    EMOTIONS = ["anger","contempt","disgust","fear","happy","neutral","sad","surprise"]
+    all_predict = []
+    data = {'label':[],'frame':[],'confident':[]}
+
+    source, view_img, imgsz, nosave, show_conf, save_path, show_fps, show_timeslide, heatmap, heatmap_path = opt.source, not opt.hide_img, opt.img_size, opt.no_save, not opt.hide_conf, opt.output_path, opt.show_fps, opt.show_timeslide, opt.heatmap, opt.heatmap_path
     webcam = source.isnumeric() or source.endswith('.txt') or source.lower().startswith(
         ('rtsp://', 'rtmp://', 'http://', 'https://'))
     # Directories
@@ -104,13 +117,32 @@ def detect(opt):
                     images.append(im0.astype(np.uint8)[int(y1):int(y2), int(x1): int(x2)])
                 
                 if images:
-                    emotions = detect_emotion(images,show_conf)
+                    emotions, predict = detect_emotion(images,show_conf)
+                    if heatmap:
+                        all_predict.append(predict)
+                    
+                    # not allow multiple detects
+                    if show_timeslide:
+                        print(predict)
+                        try:
+                            err = predict[0][0]
+                            predict = predict[-1]
+                        except:
+                            pass
+                        for e in range(len(predict)):
+                            if predict[e] > 0.3:
+                                data['label'].append(EMOTIONS[e])
+                                data['frame'].append(frame)
+                                data['confident'].append(predict[e])
+
+
                 # Write results
                 i = 0
                 #for *xyxy, conf, cls in reversed(det):
                 #for *xyxy, conf, cls in det[::-1]:
                 for *xyxy, conf, cls in reversed(det):
                     if view_img or not nosave:  
+                        move_circle(predict)
                         # Add bbox to image with emotions on 
                         label = emotions[i][0]
                         colour = colors[emotions[i][1]]
@@ -153,6 +185,27 @@ def detect(opt):
             # calculate and display fps
             print(f"FPS: {1/(time.time()-t0):.2f}"+" "*5,end="\r")
             t0 = time.time()
+
+
+    if heatmap:
+        fig = Figure()
+        canvas = FigureCanvas(fig)
+        ax = fig.add_subplot(1,1,1)
+        im = ax.imshow(all_predict[0], cmap='viridis', interpolation='nearest')
+        plt.colorbar(im, ax=ax)
+        canvas.print_figure(heatmap_path)
+
+        
+
+    if show_timeslide:
+        df = pd.DataFrame(data)
+        fig = px.line(df, x='frame', y='confident', color='label', markers=True)
+        fig.show()
+
+        df2 = df.groupby('frame', group_keys=False).apply(lambda x: x.loc[x.confident.idxmax()])
+        fig2 = px.histogram(df2, x="label")
+        fig2.show()
+ 
         
 
 if __name__ == '__main__':
@@ -171,6 +224,9 @@ if __name__ == '__main__':
     parser.add_argument('--line-thickness', default=2, type=int, help='bounding box thickness (pixels)')
     parser.add_argument('--hide-conf', default=False, action='store_true', help='hide confidences')
     parser.add_argument('--show-fps', default=False, action='store_true', help='print fps to console')
+    parser.add_argument('--show-timeslide', default=False, action='store_true', help='show emotion time slide')
+    parser.add_argument('--heatmap', default=False, action='store_true', help='show heatmap')
+    parser.add_argument('--heatmap-path', default="heatmap.jpg", help='save heatmap location')
     opt = parser.parse_args()
     check_requirements(exclude=('pycocotools', 'thop'))
     with torch.no_grad():

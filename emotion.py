@@ -50,5 +50,5 @@ def detect_emotion(images,conf=True):
             # Add emotion to result
             emotion = (max(y[i]) == y[i]).nonzero().item()
             # Add appropriate label if required
-            result.append([f"{emotions[emotion]}{f' ({100*y[i][emotion].item():.1f}%)' if conf else ''}",emotion])
-    return result
+            result.append([f"{emotions[emotion]}{f' index [{i}]'}{f' ({100*y[i][emotion].item():.1f}%)' if conf else ''}",emotion])
+    return result, y.squeeze().numpy()
